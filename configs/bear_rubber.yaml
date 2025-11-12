@@ -1,9 +1,9 @@
 train:
   seed: 0
-  gpu: 2
+  gpu: 0
   model_path: 'dataset/bear'
   export_path: './outputs'
-  train_tag: 
+  train_tag:
   epochs: 10
   internal_epochs: 30
   enable_train: True
@@ -39,7 +39,7 @@ material:
     - 'DruckerPragerPlasticity'
     # - 'SigmaPlasticity'
     # - 'VonMisesPlasticity'
-    # For saving GPU memory. May need to balance label when uncommenting. 
+    # For saving GPU memory. May need to balance label when uncommenting.
   elasticity: 'neural'
   plasticity: 'neural'
 
@@ -62,8 +62,8 @@ preprocessing:
   opacity_threshold: 0.0
   rotation_degree: [0.0]
   rotation_axis: [0]
-  sim_area: 
-  particle_filling: 
+  sim_area:
+  particle_filling:
 
 sim:
   num_grids: 25
@@ -75,7 +75,7 @@ sim:
   steps_per_frame: 10
   clip_bound: 0.5
   damping: 1.0
-  boundary_conditions: 
+  boundary_conditions:
     - type: 'surface_collider'
       point: [1.0, 1.0, 0.02]
       normal: [0.0, 0.0, 1.0]

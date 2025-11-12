@@ -224,6 +224,7 @@ def set_velocity_on_cuboid(
     velocity = torch.tensor(velocity, device=model.device).float()
     offset = model.grid_x * model.dx - point
     target = torch.all((torch.abs(offset) < size), dim=1)
+    # print("cuboid target shape: ", target.shape)
 
     def collide(model: MPMModel, target: Tensor, velocity: Tensor, start_time: float, end_time: float, reset: bool):
         time = model.time
@@ -263,6 +264,8 @@ def add_impulse_on_particles(
     force = torch.tensor(force, device=model.device).float()
     offset = model.init_pos - point
     target = torch.all((torch.abs(offset) < size), dim=1)
+    # print("impulse target shape: ", target.shape)
+    # print("impulse force shape: ", force.shape, force.min(), force.max())
     end_time = start_time + num_dt * model.dt
 
     def impulse(
