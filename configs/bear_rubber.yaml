@@ -1,6 +1,6 @@
 train:
   seed: 0
-  gpu: 0
+  gpu: 2
   model_path: 'dataset/bear'
   export_path: './outputs'
   train_tag: 
