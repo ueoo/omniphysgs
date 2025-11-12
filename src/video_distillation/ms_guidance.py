@@ -1,24 +1,23 @@
-# This implementation is based on the threestudio extension Animate124: https://github.com/HeliosZhao/Animate124/tree/threestudio 
-
-from jaxtyping import Float, Int
+# This implementation is based on the threestudio extension Animate124: https://github.com/HeliosZhao/Animate124/tree/threestudio
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+
 from diffusers import DDIMScheduler, StableDiffusionPipeline
 from diffusers.utils.import_utils import is_xformers_available
+from jaxtyping import Float, Int
+from torch import Tensor
+
+from src.utils.threestudio_utils import C, cleanup, get_device, parse_version
 
 from .prompt_processors import PromptProcessorOutput
-from src.utils.threestudio_utils import parse_version, cleanup, get_device, C
 
 
 class ModelscopeGuidance:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.device = 'cuda'
-        self.weights_dtype = (
-            torch.float16 if self.cfg.half_precision_weights else torch.float32
-        )
+        self.device = "cuda"
+        self.weights_dtype = torch.float16 if self.cfg.half_precision_weights else torch.float32
 
         pipe_kwargs = {
             "tokenizer": None,
@@ -34,13 +33,9 @@ class ModelscopeGuidance:
 
         if self.cfg.enable_memory_efficient_attention:
             if parse_version(torch.__version__) >= parse_version("2"):
-                print(
-                    "PyTorch2.0 uses memory efficient attention by default."
-                )
+                print("PyTorch2.0 uses memory efficient attention by default.")
             elif not is_xformers_available():
-                print(
-                    "xformers is not available, memory efficient attention is not enabled."
-                )
+                print("xformers is not available, memory efficient attention is not enabled.")
             else:
                 self.pipe.enable_xformers_memory_efficient_attention()
 
@@ -72,9 +67,7 @@ class ModelscopeGuidance:
         self.min_step = int(self.num_train_timesteps * self.cfg.min_step_percent)
         self.max_step = int(self.num_train_timesteps * self.cfg.max_step_percent)
 
-        self.alphas = self.scheduler.alphas_cumprod.to(
-            self.device
-        )
+        self.alphas = self.scheduler.alphas_cumprod.to(self.device)
 
         self.grad_clip_val = None
 
@@ -84,7 +77,7 @@ class ModelscopeGuidance:
         ## set spatial size
         self.spatial_size = (256, 256)
 
-    @torch.cuda.amp.autocast(enabled=False)
+    @torch.amp.autocast(enabled=False, device_type="cuda")
     def forward_unet(
         self,
         latents: Float[Tensor, "..."],
@@ -98,18 +91,16 @@ class ModelscopeGuidance:
             encoder_hidden_states=encoder_hidden_states.to(self.weights_dtype),
         ).sample.to(input_dtype)
 
-    @torch.cuda.amp.autocast(enabled=False)
+    @torch.amp.autocast(enabled=False, device_type="cuda")
     def encode_images(
         self, imgs: Float[Tensor, "B 3 N 320 576"], normalize: bool = True
     ) -> Float[Tensor, "B 4 40 72"]:
         if len(imgs.shape) == 4:
             print("Only given an image an not video")
             imgs = imgs[:, :, None]
-        
+
         batch_size, channels, num_frames, height, width = imgs.shape
-        imgs = imgs.permute(0, 2, 1, 3, 4).reshape(
-            batch_size * num_frames, channels, height, width
-        )
+        imgs = imgs.permute(0, 2, 1, 3, 4).reshape(batch_size * num_frames, channels, height, width)
         input_dtype = imgs.dtype
         if normalize:
             imgs = imgs * 2.0 - 1.0
@@ -120,18 +111,14 @@ class ModelscopeGuidance:
             with torch.no_grad():
                 posterior_mask = torch.cat(
                     [
-                        self.vae.encode(
-                            imgs[~mask_vae][i : i + 1].to(self.weights_dtype)
-                        ).latent_dist.sample()
+                        self.vae.encode(imgs[~mask_vae][i : i + 1].to(self.weights_dtype)).latent_dist.sample()
                         for i in range(imgs.shape[0] - vnum)
                     ],
                     dim=0,
                 )
             posterior = torch.cat(
                 [
-                    self.vae.encode(
-                        imgs[mask_vae][i : i + 1].to(self.weights_dtype)
-                    ).latent_dist.sample()
+                    self.vae.encode(imgs[mask_vae][i : i + 1].to(self.weights_dtype)).latent_dist.sample()
                     for i in range(vnum)
                 ],
                 dim=0,
@@ -163,15 +150,13 @@ class ModelscopeGuidance:
         )
         return latents.to(input_dtype)
 
-    @torch.cuda.amp.autocast(enabled=False)
+    @torch.amp.autocast(enabled=False, device_type="cuda")
     def decode_latents(self, latents):
         # TODO: Make decoding align with previous version
         latents = 1 / self.vae.config.scaling_factor * latents
 
         batch_size, channels, num_frames, height, width = latents.shape
-        latents = latents.permute(0, 2, 1, 3, 4).reshape(
-            batch_size * num_frames, channels, height, width
-        )
+        latents = latents.permute(0, 2, 1, 3, 4).reshape(batch_size * num_frames, channels, height, width)
 
         image = self.vae.decode(latents).sample
         video = (
@@ -210,9 +195,7 @@ class ModelscopeGuidance:
 
         # perform guidance (high scale from paper!)
         noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
-        noise_pred = noise_pred_text + self.cfg.guidance_scale * (
-            noise_pred_text - noise_pred_uncond
-        )
+        noise_pred = noise_pred_text + self.cfg.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
         if self.cfg.weighting_strategy == "sds":
             # w(t), sigma_t^2
@@ -222,9 +205,7 @@ class ModelscopeGuidance:
         elif self.cfg.weighting_strategy == "fantasia3d":
             w = (self.alphas[t] ** 0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
         else:
-            raise ValueError(
-                f"Unknown weighting strategy: {self.cfg.weighting_strategy}"
-            )
+            raise ValueError(f"Unknown weighting strategy: {self.cfg.weighting_strategy}")
 
         grad = w * (noise_pred - noise)
         return grad
@@ -249,13 +230,13 @@ class ModelscopeGuidance:
             camera_distances = camera_distances[[0]]
         if rgb_as_latents:
             latents = F.interpolate(
-                rgb_BCHW, (self.spatial_size[0]//8, self.spatial_size[1]//8), mode="bilinear", align_corners=False
+                rgb_BCHW, (self.spatial_size[0] // 8, self.spatial_size[1] // 8), mode="bilinear", align_corners=False
             )
         else:
-            rgb_BCHW_512 = F.interpolate(
-                rgb_BCHW, self.spatial_size, mode="bilinear", align_corners=False
-            )
-            rgb_BCHW_512 = rgb_BCHW_512.permute(1, 0, 2, 3)[None] # 1 * 3 * num_frames * (spatial_size_x, spatial_size_y)
+            rgb_BCHW_512 = F.interpolate(rgb_BCHW, self.spatial_size, mode="bilinear", align_corners=False)
+            rgb_BCHW_512 = rgb_BCHW_512.permute(1, 0, 2, 3)[
+                None
+            ]  # 1 * 3 * num_frames * (spatial_size_x, spatial_size_y)
             latents = self.encode_images(rgb_BCHW_512)
         text_embeddings = prompt_utils.get_text_embeddings(
             elevation, azimuth, camera_distances, self.cfg.view_dependent_prompting
@@ -293,10 +274,5 @@ class ModelscopeGuidance:
             self.grad_clip_val = C(self.cfg.grad_clip, epoch, global_step)
 
         # t annealing from ProlificDreamer
-        if (
-            self.cfg.anneal_start_step is not None
-            and global_step > self.cfg.anneal_start_step
-        ):
-            self.max_step = int(
-                self.num_train_timesteps * self.cfg.max_step_percent_annealed
-            )
+        if self.cfg.anneal_start_step is not None and global_step > self.cfg.anneal_start_step:
+            self.max_step = int(self.num_train_timesteps * self.cfg.max_step_percent_annealed)

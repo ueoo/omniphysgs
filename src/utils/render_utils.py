@@ -1,33 +1,34 @@
-import sys
 import argparse
-import math
-import cv2
-import torchvision
-import torch
-import os
-import numpy as np
-import json
 import copy
-from tqdm import tqdm
+import json
+import math
+import os
+import sys
+
+import cv2
 import imageio
+import numpy as np
+import torch
+import torchvision
 
-from .camera_view_utils import get_camera_view
-from .transformation_utils import *
-from .filling_utils import *
-
-# Gaussian splatting dependencies
-sys.path.append("third_party/gaussian-splatting")
-from utils.sh_utils import eval_sh
-from scene.gaussian_model import GaussianModel
 from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
-from scene.cameras import Camera as GSCamera
-from gaussian_renderer import render, GaussianModel
-from utils.system_utils import searchForMaxIteration
-from utils.graphics_utils import focal2fov
-from utils.loss_utils import l1_loss, l2_loss, ssim
+from tqdm import tqdm
+
+from gaussian3d.gaussian_renderer import GaussianModel, render
+from gaussian3d.scene.cameras import Camera as GSCamera
+from gaussian3d.scene.gaussian_model import GaussianModel
+from gaussian3d.utils.graphics_utils import focal2fov
+from gaussian3d.utils.loss_utils import l1_loss, l2_loss, ssim
+from gaussian3d.utils.sh_utils import eval_sh
+from gaussian3d.utils.system_utils import searchForMaxIteration
+
+from .camera_view_utils import get_camera_view
+from .filling_utils import *
+from .transformation_utils import *
+
 
 class PipelineParamsNoparse:
     """Same as PipelineParams but without argument parser."""
@@ -37,19 +38,19 @@ class PipelineParamsNoparse:
         self.compute_cov3D_python = False
         self.debug = False
 
+
 def load_gaussian_ckpt(model_path, sh_degree=3, iteration=-1):
     # Find checkpoint
     checkpt_dir = os.path.join(model_path, "point_cloud")
     if iteration == -1:
         iteration = searchForMaxIteration(checkpt_dir)
-    checkpt_path = os.path.join(
-        checkpt_dir, f"iteration_{iteration}", "point_cloud.ply"
-    )
+    checkpt_path = os.path.join(checkpt_dir, f"iteration_{iteration}", "point_cloud.ply")
 
     # Load guassians
     gaussians = GaussianModel(sh_degree)
     gaussians.load_ply(checkpt_path)
     return gaussians
+
 
 def initialize_resterize(
     viewpoint_camera,
@@ -81,16 +82,9 @@ def initialize_resterize(
     return rasterize
 
 
-def load_params_from_gs(
-    pc: GaussianModel, pipe, scaling_modifier=1.0, override_color=None
-):
+def load_params_from_gs(pc: GaussianModel, pipe, scaling_modifier=1.0, override_color=None):
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = (
-        torch.zeros_like(
-            pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda"
-        )
-        + 0
-    )
+    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
         screenspace_points.retain_grad()
     except:
@@ -135,17 +129,17 @@ def load_params_from_gs(
     }
 
 
-def load_params(gaussians, pipeline, preprocessing_params, material_params, model_params, export_path='./'):
-    
+def load_params(gaussians, pipeline, preprocessing_params, material_params, model_params, export_path="./"):
+
     params = load_params_from_gs(gaussians, pipeline)
 
     init_pos = params["pos"]
     init_cov = params["cov3D_precomp"]
     init_screen_points = params["screen_points"]
     init_opacity = params["opacity"]
-    init_shs = params["shs"]    
+    init_shs = params["shs"]
     init_e_cat, init_p_cat = None, None
-    
+
     # throw away low opacity kernels
     mask = init_opacity[:, 0] > preprocessing_params.opacity_threshold
     init_pos = init_pos[mask, :]
@@ -160,7 +154,7 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     # init_cov_mat = get_mat_from_upper(init_cov)
     # mask = filter_cov(init_cov_mat, threshold=2e-4)
     # init_cov[~mask] = 0.5 * init_cov[~mask]
-    
+
     # rotate and translate
     rotation_matrices = generate_rotation_matrices(
         torch.tensor(preprocessing_params.rotation_degree),
@@ -192,8 +186,8 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         init_cov = init_cov[mask, :]
         init_opacity = init_opacity[mask, :]
         init_shs = init_shs[mask, :]
-              
-    factor = preprocessing_params.get('scale_factor', 0.95)
+
+    factor = preprocessing_params.get("scale_factor", 0.95)
     transformed_pos, scale_origin, original_mean_pos = transform2origin(rotated_pos, factor)
     transformed_pos = shift2center05(transformed_pos)
     # modify covariance matrix accordingly
@@ -210,7 +204,7 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
             cov=init_cov,
             grid_n=filling_params["n_grid"],
             max_samples=filling_params["max_particles_num"],
-            grid_dx= 1.0 / filling_params["n_grid"],
+            grid_dx=1.0 / filling_params["n_grid"],
             density_thres=filling_params["density_threshold"],
             search_thres=filling_params["search_threshold"],
             max_particles_per_cell=filling_params["max_particles_per_cell"],
@@ -221,7 +215,7 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         ).cuda()
         print(f'Exporting filled particles to {os.path.join(export_path, "filled_particles.ply")}')
         particle_position_tensor_to_ply(pos, os.path.join(export_path, "filled_particles.ply"))
-    
+
     if filling_params is not None and filling_params["visualize"] == True:
         shs, opacity, cov = init_filled_particles(
             pos[:temp_gs_num],
@@ -233,47 +227,45 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     else:
         if filling_params is None:
             pos = transformed_pos
-        cov = torch.zeros((pos.shape[0], 6), device='cuda')
+        cov = torch.zeros((pos.shape[0], 6), device="cuda")
         cov[:temp_gs_num] = init_cov
         shs = init_shs
         opacity = init_opacity
-        
-    
+
     if model_params.normalize_features:
         # get normalized features
         n_particles = transformed_pos.shape[0]
         normalized_cov = flatten_and_normalize(init_cov, n_particles)
         normalized_shs = flatten_and_normalize(init_shs, n_particles)
         normalized_opacity = flatten_and_normalize(init_opacity, n_particles)
-        features = torch.cat((pos, normalized_shs, normalized_cov, normalized_opacity), dim=1) # (n, feat_dim)
+        features = torch.cat((pos, normalized_shs, normalized_cov, normalized_opacity), dim=1)  # (n, feat_dim)
     else:
         n_particles = transformed_pos.shape[0]
         flattened_cov = init_cov.reshape(n_particles, -1)
         flattened_shs = init_shs.reshape(n_particles, -1)
         flattened_opacity = init_opacity.reshape(n_particles, -1)
-        features = torch.cat([pos, flattened_shs, flattened_cov, flattened_opacity], dim=1) # (n, feat_dim)
-    
+        features = torch.cat([pos, flattened_shs, flattened_cov, flattened_opacity], dim=1)  # (n, feat_dim)
+
     mpm_params = {
-        'pos': pos,
-        'cov': cov,
-        'opacity': opacity,
-        'shs': shs,
-        'features': features,
+        "pos": pos,
+        "cov": cov,
+        "opacity": opacity,
+        "shs": shs,
+        "features": features,
     }
     unselected_params = {
-        'pos': unselected_pos,
-        'cov': unselected_cov,
-        'opacity': unselected_opacity,
-        'shs': unselected_shs,
+        "pos": unselected_pos,
+        "cov": unselected_cov,
+        "opacity": unselected_opacity,
+        "shs": unselected_shs,
     }
     translate_params = {
-        'rotation_matrices': rotation_matrices,
-        'scale_origin': scale_origin,
-        'original_mean_pos': original_mean_pos
+        "rotation_matrices": rotation_matrices,
+        "scale_origin": scale_origin,
+        "original_mean_pos": original_mean_pos,
     }
-    
-    return mpm_params, init_e_cat, init_p_cat, unselected_params, translate_params, init_screen_points
 
+    return mpm_params, init_e_cat, init_p_cat, unselected_params, translate_params, init_screen_points
 
 
 def convert_SH(
@@ -287,7 +279,9 @@ def convert_SH(
     dir_pp = position - viewpoint_camera.camera_center.repeat(shs_view.shape[0], 1)
     if rotation is not None:
         n = rotation.shape[0]
-        dir_pp[:n] = torch.matmul(rotation, dir_pp[:n].clone().unsqueeze(2)).squeeze(2) # replace inplace operation for backward
+        dir_pp[:n] = torch.matmul(rotation, dir_pp[:n].clone().unsqueeze(2)).squeeze(
+            2
+        )  # replace inplace operation for backward
 
     dir_pp_normalized = dir_pp / dir_pp.norm(dim=1, keepdim=True)
     sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
@@ -295,7 +289,8 @@ def convert_SH(
 
     return colors_precomp
 
-def export_rendering(rendering, step, folder, height = None, width = None):
+
+def export_rendering(rendering, step, folder, height=None, width=None):
 
     cv2_img = rendering.permute(1, 2, 0).detach().cpu().numpy()
     cv2_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
@@ -307,58 +302,68 @@ def export_rendering(rendering, step, folder, height = None, width = None):
         255 * cv2_img,
     )
 
+
 def save_video(folder, output_filename, start=0, end=9999, fps=30):
-    
+
     filenames = os.listdir(folder)
-    filenames = [f for f in filenames if int(f.split('.')[0]) >= start and int(f.split('.')[0]) < end]
+    filenames = [f for f in filenames if int(f.split(".")[0]) >= start and int(f.split(".")[0]) < end]
     filenames = sorted(filenames)
-    
+
     image = []
     for filename in filenames:
-        if filename.endswith('.png'):
+        if filename.endswith(".png"):
             image.append(imageio.v2.imread(os.path.join(folder, filename)))
     imageio.mimsave(output_filename, image, fps=fps)
+
 
 def interpolate_rgb(rgb1, rgb2, t):
     return rgb1 * (1 - t) + rgb2 * t
 
+
 def render_mpm_gaussian(
-        model_path, pipeline, render_params,
-        step, 
-        viewpoint_center_worldspace, observant_coordinates,
-        gaussians, background, 
-        pos, cov, shs, opacity, rot,
-        screen_points, 
-        logits=None
-    ):
+    model_path,
+    pipeline,
+    render_params,
+    step,
+    viewpoint_center_worldspace,
+    observant_coordinates,
+    gaussians,
+    background,
+    pos,
+    cov,
+    shs,
+    opacity,
+    rot,
+    screen_points,
+    logits=None,
+):
     current_camera = get_camera_view(
-                    model_path,
-                    default_camera_index=render_params.default_camera_index,
-                    center_view_world_space=viewpoint_center_worldspace - 0.3, # TODO: 0.3 is a magic number during early development, should be removed
-                    observant_coordinates=observant_coordinates,
-                    show_hint=render_params.show_hint,
-                    init_azimuthm=render_params.init_azimuthm,
-                    init_elevation=render_params.init_elevation,
-                    init_radius=render_params.init_radius,
-                    move_camera=render_params.move_camera,
-                    current_frame=step,
-                    delta_a=render_params.delta_a,
-                    delta_e=render_params.delta_e,
-                    delta_r=render_params.delta_r,
-                )
-    rasterize = initialize_resterize(
-        current_camera, gaussians, pipeline, background
+        model_path,
+        default_camera_index=render_params.default_camera_index,
+        center_view_world_space=viewpoint_center_worldspace
+        - 0.3,  # TODO: 0.3 is a magic number during early development, should be removed
+        observant_coordinates=observant_coordinates,
+        show_hint=render_params.show_hint,
+        init_azimuthm=render_params.init_azimuthm,
+        init_elevation=render_params.init_elevation,
+        init_radius=render_params.init_radius,
+        move_camera=render_params.move_camera,
+        current_frame=step,
+        delta_a=render_params.delta_a,
+        delta_e=render_params.delta_e,
+        delta_r=render_params.delta_r,
     )
+    rasterize = initialize_resterize(current_camera, gaussians, pipeline, background)
     if logits is None:
         colors_precomp = convert_SH(shs, current_camera, gaussians, pos, rot)
     else:
         vis = torch.softmax(logits, dim=1)
         vis = vis[:, 1] - vis[:, 0]
         vis = (vis - vis.min()) / (vis.max() - vis.min())
-        rgb1 = torch.tensor([255,0,0], device='cuda').float() / 255
-        rgb2 = torch.tensor([0,0,255], device='cuda').float() / 255
+        rgb1 = torch.tensor([255, 0, 0], device="cuda").float() / 255
+        rgb2 = torch.tensor([0, 0, 255], device="cuda").float() / 255
         colors_precomp = interpolate_rgb(rgb1, rgb2, vis.unsqueeze(1))
-        
+
     rendering, raddi = rasterize(
         means3D=pos,
         means2D=screen_points,
@@ -370,6 +375,7 @@ def render_mpm_gaussian(
         cov3D_precomp=cov,
     )
     return rendering
+
 
 def particle_position_tensor_to_ply(position_tensor, filename):
     # position is (n,3)

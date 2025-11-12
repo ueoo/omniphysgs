@@ -2,11 +2,11 @@ from typing import Optional
 
 import warp as wp
 
+
 class Tape(wp.Tape):
 
     # returns the adjoint of a kernel parameter
     def get_adjoint(self, a):
-
 
         if isinstance(a, wp.array) == False and isinstance(a, wp.codegen.StructInstance) == False:
             # if input is a simple type (e.g.: float, vec3, etc) then

@@ -1,25 +1,20 @@
+import json
 import os
 import sys
-import json
+
+import cv2
 import numpy as np
 import torch
-import cv2
+
+from gaussian3d.scene.cameras import Camera as GSCamera
+from gaussian3d.utils.graphics_utils import focal2fov
 
 from .transformation_utils import get_center_view_worldspace_and_observant_coordinate
-sys.path.append("third_party/gaussian-splatting")
-from scene.cameras import Camera as GSCamera
-from utils.graphics_utils import focal2fov
 
 
 def load_camera_params(render_params, rotation_matrices, scale_origin, original_mean_pos):
-    mpm_space_viewpoint_center = (
-        torch.tensor(render_params.mpm_space_viewpoint_center).reshape((1, 3)).cuda()
-    )
-    mpm_space_vertical_upward_axis = (
-        torch.tensor(render_params.mpm_space_vertical_upward_axis)
-        .reshape((1, 3))
-        .cuda()
-    )
+    mpm_space_viewpoint_center = torch.tensor(render_params.mpm_space_viewpoint_center).reshape((1, 3)).cuda()
+    mpm_space_vertical_upward_axis = torch.tensor(render_params.mpm_space_vertical_upward_axis).reshape((1, 3)).cuda()
     return get_center_view_worldspace_and_observant_coordinate(
         mpm_space_viewpoint_center,
         mpm_space_vertical_upward_axis,
@@ -28,15 +23,11 @@ def load_camera_params(render_params, rotation_matrices, scale_origin, original_
         original_mean_pos,
     )
 
+
 def generate_camera_rotation_matrix(camera_to_object, object_vertical_downward):
-    camera_to_object = camera_to_object / np.linalg.norm(
-        camera_to_object
-    )  # last column
+    camera_to_object = camera_to_object / np.linalg.norm(camera_to_object)  # last column
     # the second column of rotation matrix is pointing toward the downward vertical direction
-    camera_y = (
-        object_vertical_downward
-        - np.dot(object_vertical_downward, camera_to_object) * camera_to_object
-    )
+    camera_y = object_vertical_downward - np.dot(object_vertical_downward, camera_to_object) * camera_to_object
     camera_y = camera_y / np.linalg.norm(camera_y)  # second column
     first_column = np.cross(camera_y, camera_to_object)
     R = np.column_stack((first_column, camera_y, camera_to_object))
@@ -50,9 +41,7 @@ def generate_local_coord(vertical_vector):
     if np.abs(np.dot(horizontal_1, vertical_vector)) < 0.01:
         horizontal_1 = np.array([0.72, 0.37, -0.67])
     # gram schimit
-    horizontal_1 = (
-        horizontal_1 - np.dot(horizontal_1, vertical_vector) * vertical_vector
-    )
+    horizontal_1 = horizontal_1 - np.dot(horizontal_1, vertical_vector) * vertical_vector
     horizontal_1 = horizontal_1 / np.linalg.norm(horizontal_1)
     horizontal_2 = np.cross(horizontal_1, vertical_vector)
 
@@ -75,35 +64,23 @@ def get_point_on_sphere(azimuth, elevation, radius, center, observant_coordinate
     return center + observant_coordinates @ canonical_coordinates
 
 
-def get_camera_position_and_rotation(
-    azimuth, elevation, radius, view_center, observant_coordinates
-):
+def get_camera_position_and_rotation(azimuth, elevation, radius, view_center, observant_coordinates):
     # get camera position
-    position = get_point_on_sphere(
-        azimuth, elevation, radius, view_center, observant_coordinates
-    )
+    position = get_point_on_sphere(azimuth, elevation, radius, view_center, observant_coordinates)
     # get rotation matrix
-    R = generate_camera_rotation_matrix(
-        view_center - position, -observant_coordinates[:, 2]
-    )
+    R = generate_camera_rotation_matrix(view_center - position, -observant_coordinates[:, 2])
     return position, R
 
 
-def get_current_radius_azimuth_and_elevation(
-    camera_position, view_center, observesant_coordinates
-):
+def get_current_radius_azimuth_and_elevation(camera_position, view_center, observesant_coordinates):
     center2camera = -view_center + camera_position
     radius = np.linalg.norm(center2camera)
     dot_product = np.dot(center2camera, observesant_coordinates[:, 2])
-    cosine = dot_product / (
-        np.linalg.norm(center2camera) * np.linalg.norm(observesant_coordinates[:, 2])
-    )
+    cosine = dot_product / (np.linalg.norm(center2camera) * np.linalg.norm(observesant_coordinates[:, 2]))
     elevation = np.rad2deg(np.pi / 2.0 - np.arccos(cosine))
     proj_onto_hori = center2camera - dot_product * observesant_coordinates[:, 2]
     dot_product2 = np.dot(proj_onto_hori, observesant_coordinates[:, 0])
-    cosine2 = dot_product2 / (
-        np.linalg.norm(proj_onto_hori) * np.linalg.norm(observesant_coordinates[:, 0])
-    )
+    cosine2 = dot_product2 / (np.linalg.norm(proj_onto_hori) * np.linalg.norm(observesant_coordinates[:, 0]))
 
     if np.dot(proj_onto_hori, observesant_coordinates[:, 1]) > 0:
         azimuth = np.rad2deg(np.arccos(cosine2))
@@ -203,4 +180,3 @@ def get_camera_view(
             image_name="fake",
             uid=0,
         )
-

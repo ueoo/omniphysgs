@@ -1,2 +1,2 @@
-from .tape import Tape, CondTape
 from .svd import SVD
+from .tape import CondTape, Tape

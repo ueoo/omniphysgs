@@ -1,22 +1,25 @@
 import math
+
 from typing import *
+
 import torch
 import torch.nn as nn
+
 from torch import Tensor
 
 from ..abstract import Plasticity
+
 
 class DruckerPragerPlasticity(Plasticity):
     def __init__(self) -> None:
         super().__init__()
 
-        self.register_buffer('log_E', torch.Tensor([2.0e6]).log())
-        self.register_buffer('nu', torch.Tensor([0.4]))
-        self.register_buffer('friction_angle', torch.Tensor([25.0]))
-        self.register_buffer('cohesion', torch.Tensor([0.0]))
+        self.register_buffer("log_E", torch.Tensor([2.0e6]).log())
+        self.register_buffer("nu", torch.Tensor([0.4]))
+        self.register_buffer("friction_angle", torch.Tensor([25.0]))
+        self.register_buffer("cohesion", torch.Tensor([0.0]))
 
-
-    def forward(self, F: Tensor, log_E: Optional[Tensor]=None, nu: Optional[Tensor]=None) -> Tensor:
+    def forward(self, F: Tensor, log_E: Optional[Tensor] = None, nu: Optional[Tensor] = None) -> Tensor:
 
         if log_E is None:
             E = self.log_E.exp()
@@ -24,7 +27,7 @@ class DruckerPragerPlasticity(Plasticity):
             E = log_E.exp()
         if nu is None:
             nu = self.nu
-            
+
         friction_angle = self.friction_angle
         sin_phi = torch.sin(torch.deg2rad(friction_angle))
         alpha = math.sqrt(2 / 3) * 2 * sin_phi / (3 - sin_phi)
@@ -35,7 +38,7 @@ class DruckerPragerPlasticity(Plasticity):
 
         if mu.dim() != 0:
             mu = mu.reshape(-1, 1)
-            
+
         if la.dim() != 0:
             la = la.reshape(-1, 1)
 
@@ -50,7 +53,7 @@ class DruckerPragerPlasticity(Plasticity):
         trace = epsilon.sum(dim=1, keepdim=True)
         epsilon_hat = epsilon - trace / self.dim
         epsilon_hat_norm = torch.linalg.norm(epsilon_hat, dim=1, keepdim=True)
-        epsilon_hat_norm = torch.clamp_min(epsilon_hat_norm, 1e-10) # avoid nan
+        epsilon_hat_norm = torch.clamp_min(epsilon_hat_norm, 1e-10)  # avoid nan
         expand_epsilon = torch.ones_like(epsilon) * cohesion
 
         shifted_trace = trace - cohesion * self.dim
@@ -64,17 +67,18 @@ class DruckerPragerPlasticity(Plasticity):
         F = torch.matmul(torch.matmul(U, torch.diag_embed(epsilon.exp())), Vh)
 
         return F
-    
+
+
 class IdentityPlasticity(Plasticity):
-    def forward(self, F: Tensor, log_E: Optional[Tensor]=None, nu: Optional[Tensor]=None) -> Tensor:
+    def forward(self, F: Tensor, log_E: Optional[Tensor] = None, nu: Optional[Tensor] = None) -> Tensor:
         return F
-    
-    
+
+
 class SigmaPlasticity(Plasticity):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, F: Tensor, log_E: Optional[Tensor]=None, nu: Optional[Tensor]=None) -> Tensor:
+    def forward(self, F: Tensor, log_E: Optional[Tensor] = None, nu: Optional[Tensor] = None) -> Tensor:
         J = torch.det(F)
 
         # unilateral incompressibility: https://github.com/penn-graphics-research/ziran2020/blob/master/Lib/Ziran/Physics/PlasticityApplier.cpp#L1084
@@ -83,19 +87,17 @@ class SigmaPlasticity(Plasticity):
         Je_1_3 = torch.pow(J, 1.0 / 3.0).view(-1, 1).expand(-1, 3)
         F = torch.diag_embed(Je_1_3)
         return F
-    
-    
+
+
 class VonMisesPlasticity(Plasticity):
     def __init__(self) -> None:
         super().__init__()
 
-        self.register_buffer('log_E', torch.Tensor([2.0e6]).log())
-        self.register_buffer('nu', torch.Tensor([0.4]))
-        self.register_buffer('sigma_y', torch.Tensor([1.0e3]))
+        self.register_buffer("log_E", torch.Tensor([2.0e6]).log())
+        self.register_buffer("nu", torch.Tensor([0.4]))
+        self.register_buffer("sigma_y", torch.Tensor([1.0e3]))
 
-
-    def forward(self, F: Tensor, log_E: Optional[Tensor]=None, nu: Optional[Tensor]=None) -> Tensor:
-
+    def forward(self, F: Tensor, log_E: Optional[Tensor] = None, nu: Optional[Tensor] = None) -> Tensor:
 
         if log_E is None:
             E = self.log_E.exp()
@@ -103,7 +105,7 @@ class VonMisesPlasticity(Plasticity):
             E = log_E.exp()
         if nu is None:
             nu = self.nu
-            
+
         sigma_y = self.sigma_y
 
         mu = E / (2 * (1 + nu))
@@ -120,8 +122,8 @@ class VonMisesPlasticity(Plasticity):
         trace = epsilon.sum(dim=1, keepdim=True)
         epsilon_hat = epsilon - trace / self.dim
         epsilon_hat_norm = torch.linalg.norm(epsilon_hat, dim=1, keepdim=True)
-        epsilon_hat_norm = torch.clamp_min(epsilon_hat_norm, 1e-10) # avoid nan
-        
+        epsilon_hat_norm = torch.clamp_min(epsilon_hat_norm, 1e-10)  # avoid nan
+
         delta_gamma = epsilon_hat_norm - sigma_y / (2 * mu)
         cond_yield = (delta_gamma > 0).view(-1, 1, 1)
 

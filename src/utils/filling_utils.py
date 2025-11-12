@@ -1,16 +1,19 @@
-# TODO: Please refer to the original taichi implementation in PhysGaussian for the following code snippet. 
-# The following code may be buggy or may not work as intended. 
+# TODO: Please refer to the original taichi implementation in PhysGaussian for the following code snippet.
+# The following code may be buggy or may not work as intended.
 
-import torch
 import os
+
+import mcubes
 import numpy as np
 import taichi as ti
-import mcubes
+import torch
+
 
 # 1. densify grids
 # 2. identify grids whose density is larger than some threshold
 # 3. filling grids with particles
 # 4. identify and fill internal grids
+
 
 @ti.func
 def compute_density(index, pos, opacity, cov, grid_dx):
@@ -54,9 +57,7 @@ def densify_grids(
         sig[0] = ti.max(sig[0], 1e-8)
         sig[1] = ti.max(sig[1], 1e-8)
         sig[2] = ti.max(sig[2], 1e-8)
-        sig_mat = ti.Matrix(
-            [[1.0 / sig[0], 0, 0], [0, 1.0 / sig[1], 0], [0, 0, 1.0 / sig[2]]]
-        )
+        sig_mat = ti.Matrix([[1.0 / sig[0], 0, 0], [0, 1.0 / sig[1], 0], [0, 0, 1.0 / sig[2]]])
         cov = Q @ sig_mat @ Q.transpose()
         r = 0.0
         for idx in ti.static(range(3)):
@@ -117,9 +118,7 @@ def fill_dense_grids(
 
 
 @ti.func
-def collision_search(
-    grid: ti.template(), grid_density: ti.template(), index, dir_type, size, threshold
-) -> bool:
+def collision_search(grid: ti.template(), grid_density: ti.template(), index, dir_type, size, threshold) -> bool:
     dir = ti.Vector([0, 0, 0])
     if dir_type == 0:
         dir[0] = 1
@@ -148,9 +147,7 @@ def collision_search(
 
 
 @ti.func
-def collision_times(
-    grid: ti.template(), grid_density: ti.template(), index, dir_type, size, threshold
-) -> int:
+def collision_times(grid: ti.template(), grid_density: ti.template(), index, dir_type, size, threshold) -> int:
     dir = ti.Vector([0, 0, 0])
     times = 0
     if dir_type > 5 or dir_type < 0:
@@ -229,9 +226,7 @@ def internal_filling(
                         di = ti.random()
                         dj = ti.random()
                         dk = ti.random()
-                        new_particles[index] = (
-                            ti.Vector([i + di, j + dj, k + dk]) * grid_dx
-                        )
+                        new_particles[index] = ti.Vector([i + di, j + dj, k + dk]) * grid_dx
 
     return new_start_idx
 
@@ -247,9 +242,7 @@ def assign_particle_to_grid(pos: ti.template(), grid: ti.template(), grid_dx: fl
 
 
 @ti.kernel
-def compute_particle_volume(
-    pos: ti.template(), grid: ti.template(), particle_vol: ti.template(), grid_dx: float
-):
+def compute_particle_volume(pos: ti.template(), grid: ti.template(), particle_vol: ti.template(), grid_dx: float):
     for pi in range(pos.shape[0]):
         p = pos[pi]
         i = ti.floor(p[0] / grid_dx, dtype=int)
@@ -351,9 +344,7 @@ def fill_particles(
     # smooth density_field
     if smooth:
         df = grid_density.to_numpy()
-        smoothed_df = mcubes.smooth(df, method="constrained", max_iters=500).astype(
-            np.float32
-        )
+        smoothed_df = mcubes.smooth(df, method="constrained", max_iters=500).astype(np.float32)
         grid_density.from_numpy(smoothed_df)
         print("smooth finished")
 

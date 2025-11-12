@@ -2,11 +2,15 @@
 
 import gc
 import os
+
 from typing import Any
 
 import tinycudann as tcnn
 import torch
+
 from packaging import version
+
+from .config import config_to_primitive
 
 
 def parse_version(ver: str):
@@ -17,8 +21,8 @@ def cleanup():
     gc.collect()
     torch.cuda.empty_cache()
     tcnn.free_temporary_memory()
-    
-    
+
+
 def get_rank():
     # SLURM_PROCID can be set even if SLURM is not managing the multiprocessing,
     # therefore LOCAL_RANK needs to be checked first

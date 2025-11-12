@@ -1,10 +1,12 @@
 import torch
-import torch.nn as nn
 import torch.autograd as autograd
-from torch import Tensor
+import torch.nn as nn
 import warp as wp
 
+from torch import Tensor
+
 from .tape import Tape
+
 
 class SVDFunction(autograd.Function):
 
@@ -38,7 +40,9 @@ class SVDFunction(autograd.Function):
         return U_torch, sigma_torch, Vh_torch
 
     @staticmethod
-    def backward(ctx: autograd.function.FunctionCtx, grad_U: Tensor, grad_sigma: Tensor, grad_Vh: Tensor) -> tuple[Tensor]:
+    def backward(
+        ctx: autograd.function.FunctionCtx, grad_U: Tensor, grad_sigma: Tensor, grad_Vh: Tensor
+    ) -> tuple[Tensor]:
 
         tape = ctx.tape
         A = ctx.A
@@ -47,7 +51,9 @@ class SVDFunction(autograd.Function):
         Vh = ctx.Vh
 
         U.grad = wp.zeros_like(U) if grad_U is None else wp.from_torch(grad_U.contiguous(), dtype=wp.mat33)
-        sigma.grad = wp.zeros_like(sigma) if grad_sigma is None else wp.from_torch(grad_sigma.contiguous(), dtype=wp.vec3)
+        sigma.grad = (
+            wp.zeros_like(sigma) if grad_sigma is None else wp.from_torch(grad_sigma.contiguous(), dtype=wp.vec3)
+        )
         Vh.grad = wp.zeros_like(Vh) if grad_Vh is None else wp.from_torch(grad_Vh.contiguous(), dtype=wp.mat33)
 
         tape.backward()
@@ -59,10 +65,11 @@ class SVDFunction(autograd.Function):
     @staticmethod
     @wp.kernel
     def batch_svd(
-            A: wp.array(dtype=wp.mat33),
-            U: wp.array(dtype=wp.mat33),
-            sigma: wp.array(dtype=wp.vec3),
-            Vh: wp.array(dtype=wp.mat33)) -> None:
+        A: wp.array(dtype=wp.mat33),
+        U: wp.array(dtype=wp.mat33),
+        sigma: wp.array(dtype=wp.vec3),
+        Vh: wp.array(dtype=wp.mat33),
+    ) -> None:
 
         p = wp.tid()
 
@@ -78,16 +85,12 @@ class SVDFunction(autograd.Function):
 
         if U_p_det < 0.0:
             U_p = wp.mat33(
-                U_p[0, 0], U_p[0, 1], -U_p[0, 2],
-                U_p[1, 0], U_p[1, 1], -U_p[1, 2],
-                U_p[2, 0], U_p[2, 1], -U_p[2, 2]
+                U_p[0, 0], U_p[0, 1], -U_p[0, 2], U_p[1, 0], U_p[1, 1], -U_p[1, 2], U_p[2, 0], U_p[2, 1], -U_p[2, 2]
             )
             sigma_p = wp.vec3(sigma_p[0], sigma_p[1], -sigma_p[2])
         if V_p_det < 0.0:
             V_p = wp.mat33(
-                V_p[0, 0], V_p[0, 1], -V_p[0, 2],
-                V_p[1, 0], V_p[1, 1], -V_p[1, 2],
-                V_p[2, 0], V_p[2, 1], -V_p[2, 2]
+                V_p[0, 0], V_p[0, 1], -V_p[0, 2], V_p[1, 0], V_p[1, 1], -V_p[1, 2], V_p[2, 0], V_p[2, 1], -V_p[2, 2]
             )
             sigma_p = wp.vec3(sigma_p[0], sigma_p[1], -sigma_p[2])
 
