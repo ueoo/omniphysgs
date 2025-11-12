@@ -222,3 +222,4 @@ outputs/
 .threestudio_cache/
 
 dataset
+*.code-workspace
