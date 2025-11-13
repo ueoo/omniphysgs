@@ -236,14 +236,11 @@ def main(cfg, args=None):
     # init params
     requires_grad = train_params.enable_train
     x = trans_pos.detach()
-    # a default vertical velocity is set
-    # v = torch.stack(
-    #     [torch.tensor([0.0, 0.0, -0.3], device=torch_device) for _ in range(gs_num)]
-    # )
+    init_velocity = sim_params.get("init_velocity", [0.0, 0.0, -0.3])
+    print(f"Init velocity: {init_velocity}")
     v = torch.stack(
-        [torch.tensor([0.3, 0.0, 0.0], device=torch_device) for _ in range(gs_num)]
+        [torch.tensor(init_velocity, device=torch_device) for _ in range(gs_num)]
     )
-    # v = torch.zeros((gs_num, 3), device=torch_device)
     C = torch.zeros((gs_num, 3, 3), device=torch_device)
     F = torch.eye(3, device=torch_device).unsqueeze(0).repeat(gs_num, 1, 1)
 
