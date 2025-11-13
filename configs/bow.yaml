@@ -67,7 +67,7 @@ preprocessing:
 sim:
   num_grids: 25
   dt: 2e-4
-  gravity: [0.0, 0.0, -9.8]
+  gravity: [0.0, 0.0, 0.0]
   num_stages: 150
   frames_per_stage: 20
   num_frames: 150
