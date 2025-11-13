@@ -2,7 +2,7 @@ train:
   seed: 0
   gpu: 0
   model_path: 'dataset/laptop'
-  export_path: './outputs'
+  export_path: '/datal/outputs'
   train_tag:
   epochs: 10
   internal_epochs: 30

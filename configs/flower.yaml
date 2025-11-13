@@ -2,7 +2,7 @@ train:
   seed: 0
   gpu: 0
   model_path: 'dataset/flower'
-  export_path: './outputs'
+  export_path: '/datal/outputs'
   train_tag:
   epochs: 10
   internal_epochs: 30
@@ -88,5 +88,23 @@ sim:
       point: [0.5, 0.5, 0.9]
       size: [0.5, 0.5, 0.1]
       force: [10.0, 0, 0]
-      num_dt: 1
-      start_time: 0
+      num_dt: 1        # 30 frames * 10 steps
+      start_time: 0.02   # skip_time
+    - type: 'particle_impulse'
+      point: [0.5, 0.5, 0.7]
+      size: [0.5, 0.5, 0.3]
+      force: [-20.0, 0, 0]
+      num_dt: 2
+      start_time: 0.1   # 0.02 + 30 * 0.002
+    # - type: 'particle_impulse'
+    #   point: [0.5, 0.5, 0.9]
+    #   size: [0.5, 0.5, 0.1]
+    #   force: [10.0, 0, 0]
+    #   num_dt: 1
+    #   start_time: 0
+    # - type: 'particle_impulse'
+    #   point: [0.5, 0.5, 0.9]
+    #   size: [0.5, 0.5, 0.1]
+    #   force: [-10.0, 0, 0]
+    #   num_dt: 1
+    #   start_time: 1.0
