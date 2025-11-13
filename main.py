@@ -1,11 +1,11 @@
 import argparse
+import copy
 import math
 import os
 import random
 import shutil
 import time
 
-import copy
 import numpy as np
 import taichi as ti
 import torch
@@ -136,7 +136,7 @@ def main(cfg, args=None):
     print(f"Built gaussian particle number: {gs_num}\n")
 
     if not train_params.enable_train:
-        os.makedirs(os.path.join(export_path, "gaussians_rendered"), exist_ok=True)
+        os.makedirs(os.path.join(export_path, "gaussians"), exist_ok=True)
 
     # camera setting
     (
@@ -243,9 +243,7 @@ def main(cfg, args=None):
     x = trans_pos.detach()
     init_velocity = sim_params.get("init_velocity", [0.0, 0.0, -0.3])
     print(f"Init velocity: {init_velocity}")
-    v = torch.stack(
-        [torch.tensor(init_velocity, device=torch_device) for _ in range(gs_num)]
-    )
+    v = torch.stack([torch.tensor(init_velocity, device=torch_device) for _ in range(gs_num)])
     C = torch.zeros((gs_num, 3, 3), device=torch_device)
     F = torch.eye(3, device=torch_device).unsqueeze(0).repeat(gs_num, 1, 1)
 
@@ -299,16 +297,9 @@ def main(cfg, args=None):
             if train_params.export_video:
                 export_rendering(rendering, frame_id, folder=os.path.join(export_path, "images"))
             if not train_params.enable_train:
-                log_scales_skip, quats_skip = compute_log_scales_and_quats_from_cov_upper(render_cov)
-                export_gaussians_ply_direct(
-                    template_gaussians=gaussians,
-                    pos=render_pos,
-                    shs=render_shs,
-                    opacity=render_opacity,
-                    log_scales=log_scales_skip,
-                    quats=quats_skip,
-                    filepath=os.path.join(export_path, "gaussians_rendered", f"frame_{frame_id:04d}.ply"),
-                )
+                gs_save_path = os.path.join(export_path, "gaussians", f"frame_{frame_id:04d}.ply")
+                export_gaussians_ply(render_pos, render_cov, render_shs, render_opacity, gaussians, gs_save_path)
+
             for step in range(steps_per_frame):
                 # mpm step, using checkpoint to save memory
                 stress = checkpoint(elasticity, F, e_cat)
@@ -426,17 +417,10 @@ def main(cfg, args=None):
                         export_rendering(rendering, frame_id, folder=os.path.join(export_path, "images"))
 
                     if not train_params.enable_train:
-                        log_scales_all, quats_all = compute_log_scales_and_quats_from_cov_upper(render_cov)
-                        export_gaussians_ply_direct(
-                            template_gaussians=gaussians,
-                            pos=render_pos,
-                            shs=render_shs,
-                            opacity=render_opacity,
-                            log_scales=log_scales_all,
-                            quats=quats_all,
-                            filepath=os.path.join(export_path, "gaussians_rendered", f"frame_{frame_id:04d}.ply"),
+                        gs_save_path = os.path.join(export_path, "gaussians", f"frame_{frame_id:04d}.ply")
+                        export_gaussians_ply(
+                            render_pos, render_cov, render_shs, render_opacity, gaussians, gs_save_path
                         )
-
 
                     # mpm step
                     for step in tqdm(range(steps_per_frame), leave=False, desc=f"Frame {frame}"):

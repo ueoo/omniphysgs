@@ -20,11 +20,11 @@ from tqdm import tqdm
 from gaussian3d.gaussian_renderer import GaussianModel, render
 from gaussian3d.scene.cameras import Camera as GSCamera
 from gaussian3d.scene.gaussian_model import GaussianModel
+from gaussian3d.utils.general_utils import inverse_sigmoid
 from gaussian3d.utils.graphics_utils import focal2fov
 from gaussian3d.utils.loss_utils import l1_loss, l2_loss, ssim
 from gaussian3d.utils.sh_utils import eval_sh
 from gaussian3d.utils.system_utils import searchForMaxIteration
-from gaussian3d.utils.general_utils import inverse_sigmoid
 
 from .camera_view_utils import get_camera_view
 from .filling_utils import *
@@ -97,14 +97,11 @@ def load_params_from_gs(pc: GaussianModel, pipe, scaling_modifier=1.0, override_
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
-    scales = None
-    rotations = None
+    scales = pc.get_scaling
+    rotations = pc.get_rotation
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
-    else:
-        scales = pc.get_scaling
-        rotations = pc.get_rotation
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -139,6 +136,8 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     init_screen_points = params["screen_points"]
     init_opacity = params["opacity"]
     init_shs = params["shs"]
+    init_scales = params["scales"]
+    init_rotations = params["rotations"]
     print(f"Init pos shape: {init_pos.shape}")
     print(f"Init pos x min: {init_pos[:, 0].min()}, max: {init_pos[:, 0].max()}")
     print(f"Init pos y min: {init_pos[:, 1].min()}, max: {init_pos[:, 1].max()}")
@@ -153,6 +152,7 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     init_opacity = init_opacity[mask, :]
     init_screen_points = init_screen_points[mask, :]
     init_shs = init_shs[mask, :]
+    init_scales = init_scales[mask, :]
 
     # throw away large kernels
     # this is useful when the Gaussian asset is of low quality
@@ -169,7 +169,9 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     rotated_pos = apply_rotations(init_pos, rotation_matrices)
 
     # select a sim area and save params of unslected particles
-    unselected_pos, unselected_cov, unselected_opacity, unselected_shs = (
+    unselected_pos, unselected_cov, unselected_opacity, unselected_shs, unselected_scales, unselected_rotations = (
+        None,
+        None,
         None,
         None,
         None,
@@ -187,18 +189,23 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         unselected_cov = init_cov[~mask, :]
         unselected_opacity = init_opacity[~mask, :]
         unselected_shs = init_shs[~mask, :]
-
+        unselected_scales = init_scales[~mask, :]
+        unselected_rotations = init_rotations[~mask, :, :]
         rotated_pos = rotated_pos[mask, :]
         init_cov = init_cov[mask, :]
         init_opacity = init_opacity[mask, :]
         init_shs = init_shs[mask, :]
-
+        init_scales = init_scales[mask, :]
+        init_rotations = init_rotations[mask, :, :]
     factor = preprocessing_params.get("scale_factor", 0.95)
     transformed_pos, scale_origin, original_mean_pos = transform2origin(rotated_pos, factor)
     transformed_pos = shift2center05(transformed_pos)
     # modify covariance matrix accordingly
     init_cov = apply_cov_rotations(init_cov, rotation_matrices)
     init_cov = scale_origin * scale_origin * init_cov
+    init_scales = init_scales * scale_origin
+    init_rotations = init_rotations
+    unselected_rotations = unselected_rotations
 
     temp_gs_num = transformed_pos.shape[0]
     filling_params = preprocessing_params.particle_filling
@@ -237,6 +244,8 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         cov[:temp_gs_num] = init_cov
         shs = init_shs
         opacity = init_opacity
+        scales = init_scales
+        rotations = init_rotations
 
     if model_params.normalize_features:
         # get normalized features
@@ -244,12 +253,16 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         normalized_cov = flatten_and_normalize(init_cov, n_particles)
         normalized_shs = flatten_and_normalize(init_shs, n_particles)
         normalized_opacity = flatten_and_normalize(init_opacity, n_particles)
+        # normalized_scales = flatten_and_normalize(init_scales, n_particles)
+        # normalized_rotations = flatten_and_normalize(init_rotations, n_particles)
         features = torch.cat((pos, normalized_shs, normalized_cov, normalized_opacity), dim=1)  # (n, feat_dim)
     else:
         n_particles = transformed_pos.shape[0]
         flattened_cov = init_cov.reshape(n_particles, -1)
         flattened_shs = init_shs.reshape(n_particles, -1)
         flattened_opacity = init_opacity.reshape(n_particles, -1)
+        # flattened_scales = init_scales.reshape(n_particles, -1)
+        # flattened_rotations = init_rotations.reshape(n_particles, -1)
         features = torch.cat([pos, flattened_shs, flattened_cov, flattened_opacity], dim=1)  # (n, feat_dim)
 
     mpm_params = {
@@ -258,12 +271,16 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         "opacity": opacity,
         "shs": shs,
         "features": features,
+        "scales": scales,
+        "rotations": rotations,
     }
     unselected_params = {
         "pos": unselected_pos,
         "cov": unselected_cov,
         "opacity": unselected_opacity,
         "shs": unselected_shs,
+        "scales": unselected_scales,
+        "rotations": unselected_rotations,
     }
     translate_params = {
         "rotation_matrices": rotation_matrices,
@@ -271,10 +288,10 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         "original_mean_pos": original_mean_pos,
     }
 
-    print(f"Trans (preprocessed GS) pos shape: {pos.shape}")
-    print(f"Trans (preprocessed GS) pos x min: {pos[:, 0].min()}, max: {pos[:, 0].max()}")
-    print(f"Trans (preprocessed GS) pos y min: {pos[:, 1].min()}, max: {pos[:, 1].max()}")
-    print(f"Trans (preprocessed GS) pos z min: {pos[:, 2].min()}, max: {pos[:, 2].max()}")
+    print(f"Preprocessed GS pos shape: {pos.shape}")
+    print(f"Preprocessed GS pos x min: {pos[:, 0].min()}, max: {pos[:, 0].max()}")
+    print(f"Preprocessed GS pos y min: {pos[:, 1].min()}, max: {pos[:, 1].max()}")
+    print(f"Preprocessed GS pos z min: {pos[:, 2].min()}, max: {pos[:, 2].max()}")
 
     return mpm_params, init_e_cat, init_p_cat, unselected_params, translate_params, init_screen_points
 
@@ -408,129 +425,123 @@ end_header
         f.write(position.tobytes())
 
 
-def _rotation_matrix_to_quaternion_batch(R: torch.Tensor) -> torch.Tensor:
+def _rotation_matrix_to_quaternion(rotation_matrix: torch.Tensor) -> torch.Tensor:
     """
-    Convert a batch of rotation matrices to unit quaternions (w, x, y, z).
-    R: (N, 3, 3) rotation matrices
-    return: (N, 4) normalized quaternions with w >= 0 for sign consistency
+    Convert batch of 3x3 rotation matrices to quaternions (w, x, y, z).
+    rotation_matrix: (N, 3, 3)
+    returns: (N, 4)
     """
-    assert R.dim() == 3 and R.shape[1:] == (3, 3)
-    m00, m01, m02 = R[:, 0, 0], R[:, 0, 1], R[:, 0, 2]
-    m10, m11, m12 = R[:, 1, 0], R[:, 1, 1], R[:, 1, 2]
-    m20, m21, m22 = R[:, 2, 0], R[:, 2, 1], R[:, 2, 2]
-    trace = m00 + m11 + m22
+    assert rotation_matrix.ndim == 3 and rotation_matrix.shape[1:] == (3, 3)
+    m = rotation_matrix
+    t = m[:, 0, 0] + m[:, 1, 1] + m[:, 2, 2]
+    q = torch.empty(m.shape[0], 4, device=m.device, dtype=m.dtype)
 
-    q = torch.zeros((R.shape[0], 4), device=R.device, dtype=R.dtype)
+    # Case 1: trace positive
+    mask = t > 0
+    if mask.any():
+        r = torch.sqrt(t[mask] + 1.0)
+        q[mask, 0] = 0.5 * r
+        r = 0.5 / r
+        q[mask, 1] = (m[mask, 2, 1] - m[mask, 1, 2]) * r
+        q[mask, 2] = (m[mask, 0, 2] - m[mask, 2, 0]) * r
+        q[mask, 3] = (m[mask, 1, 0] - m[mask, 0, 1]) * r
 
-    cond0 = trace > 0.0
-    s0 = torch.sqrt(torch.clamp(trace[cond0] + 1.0, min=1e-12)) * 2.0
-    q[cond0, 0] = 0.25 * s0
-    q[cond0, 1] = (m21[cond0] - m12[cond0]) / s0
-    q[cond0, 2] = (m02[cond0] - m20[cond0]) / s0
-    q[cond0, 3] = (m10[cond0] - m01[cond0]) / s0
+    # Case 2: x is largest
+    mask = ~mask & (m[:, 0, 0] > m[:, 1, 1]) & (m[:, 0, 0] > m[:, 2, 2])
+    if mask.any():
+        r = torch.sqrt(1.0 + m[mask, 0, 0] - m[mask, 1, 1] - m[mask, 2, 2])
+        q[mask, 1] = 0.5 * r
+        r = 0.5 / r
+        q[mask, 0] = (m[mask, 2, 1] - m[mask, 1, 2]) * r
+        q[mask, 2] = (m[mask, 0, 1] + m[mask, 1, 0]) * r
+        q[mask, 3] = (m[mask, 0, 2] + m[mask, 2, 0]) * r
 
-    cond1 = ~cond0 & (m00 >= m11) & (m00 >= m22)
-    s1 = torch.sqrt(torch.clamp(1.0 + m00[cond1] - m11[cond1] - m22[cond1], min=1e-12)) * 2.0
-    q[cond1, 0] = (m21[cond1] - m12[cond1]) / s1
-    q[cond1, 1] = 0.25 * s1
-    q[cond1, 2] = (m01[cond1] + m10[cond1]) / s1
-    q[cond1, 3] = (m02[cond1] + m20[cond1]) / s1
+    # Case 3: y is largest
+    mask = ~mask & (m[:, 1, 1] > m[:, 2, 2])
+    if mask.any():
+        r = torch.sqrt(1.0 + m[mask, 1, 1] - m[mask, 0, 0] - m[mask, 2, 2])
+        q[mask, 2] = 0.5 * r
+        r = 0.5 / r
+        q[mask, 0] = (m[mask, 0, 2] - m[mask, 2, 0]) * r
+        q[mask, 1] = (m[mask, 0, 1] + m[mask, 1, 0]) * r
+        q[mask, 3] = (m[mask, 1, 2] + m[mask, 2, 1]) * r
 
-    cond2 = ~cond0 & ~cond1 & (m11 >= m22)
-    s2 = torch.sqrt(torch.clamp(1.0 + m11[cond2] - m00[cond2] - m22[cond2], min=1e-12)) * 2.0
-    q[cond2, 0] = (m02[cond2] - m20[cond2]) / s2
-    q[cond2, 1] = (m01[cond2] + m10[cond2]) / s2
-    q[cond2, 2] = 0.25 * s2
-    q[cond2, 3] = (m12[cond2] + m21[cond2]) / s2
+    # Case 4: z is largest
+    mask = ~mask
+    if mask.any():
+        r = torch.sqrt(1.0 + m[mask, 2, 2] - m[mask, 0, 0] - m[mask, 1, 1])
+        q[mask, 3] = 0.5 * r
+        r = 0.5 / r
+        q[mask, 0] = (m[mask, 1, 0] - m[mask, 0, 1]) * r
+        q[mask, 1] = (m[mask, 0, 2] + m[mask, 2, 0]) * r
+        q[mask, 2] = (m[mask, 1, 2] + m[mask, 2, 1]) * r
 
-    cond3 = ~cond0 & ~cond1 & ~cond2
-    s3 = torch.sqrt(torch.clamp(1.0 + m22[cond3] - m00[cond3] - m11[cond3], min=1e-12)) * 2.0
-    q[cond3, 0] = (m10[cond3] - m01[cond3]) / s3
-    q[cond3, 1] = (m02[cond3] + m20[cond3]) / s3
-    q[cond3, 2] = (m12[cond3] + m21[cond3]) / s3
-    q[cond3, 3] = 0.25 * s3
-
-    # Normalize
-    q = q / torch.clamp(torch.linalg.norm(q, dim=1, keepdim=True), min=1e-12)
-    # Enforce a consistent hemisphere (w >= 0) to avoid sign flips
-    flip = q[:, 0] < 0
-    q[flip] = -q[flip]
+    # Normalize to be safe
+    q = q / q.norm(dim=1, keepdim=True)
     return q
 
 
-def compute_log_scales_and_quats_from_L(L: torch.Tensor):
+def export_gaussians_ply(render_pos, render_cov, render_shs, render_opacity, gaussians, filename):
     """
-    Compute log-scales and rotation quaternions from a batch of 3x3 matrices L using SVD.
-    Returns:
-    - log_scales: (N, 3)
-    - quats: (N, 4)
+    Build a GaussianModel with the current rendered parameters and save as PLY,
+    such that gaussian_renderer.render with compute_cov3D_python=True
+    reproduces the same covariance used in our MPM renderer.
+    Inputs:
+      render_pos:     (N, 3)
+      render_cov:     (N, 6) upper-triangular 3x3 covariance
+      render_shs:     (N, L2, 3) SH features (same layout as GaussianModel.get_features)
+      render_opacity: (N, 1) in [0,1]
     """
-    # Batched SVD
-    U, S, Vh = torch.linalg.svd(L, full_matrices=False)
-    # Enforce a proper rotation (det(U) >= 0) without branching
-    detU = torch.det(U)
-    fix = torch.where(detU < 0, torch.tensor(-1.0, device=U.device, dtype=U.dtype), torch.tensor(1.0, device=U.device, dtype=U.dtype))
-    D = torch.stack([torch.ones_like(fix), torch.ones_like(fix), fix], dim=1)  # (N,3)
-    U = torch.matmul(U, torch.diag_embed(D))
-    S = torch.clamp(S, min=1e-12)
-    log_scales = torch.log(S)
-    quats = _rotation_matrix_to_quaternion_batch(U)
-    return log_scales, quats
+    out_gaussians = GaussianModel(gaussians.max_sh_degree)
+    out_gaussians.active_sh_degree = gaussians.active_sh_degree
 
+    # Positions (N,3)
+    out_gaussians._xyz = render_pos.detach().clone()
 
-def compute_log_scales_and_quats_from_F_and_base_chol(F: torch.Tensor, base_chol: torch.Tensor):
-    """
-    Compute log-scales and rotation quaternions for the simulated subset from deformation gradient F
-    and precomputed base covariance Cholesky factor base_chol.
-    """
-    L = torch.bmm(F, base_chol)  # (N,3,3)
-    return compute_log_scales_and_quats_from_L(L)
+    # SH features: split DC vs rest to mirror GaussianModel storage
+    # render_shs: (N, L2, 3), L2 = (max_sh_degree+1)**2
+    feats = render_shs.detach().clone()
+    # If layout is (N,3,L2), bring it to (N,L2,3)
+    if feats.shape[1] == 3 and feats.shape[2] != 3:
+        feats = feats.transpose(1, 2).contiguous()
+    dc = feats[:, 0:1, :]  # (N,1,3)
+    rest = feats[:, 1:, :]  # (N,L2-1,3)
+    out_gaussians._features_dc = dc.detach().clone()
+    out_gaussians._features_rest = rest.detach().clone()
 
+    # Opacity: convert back to logits because GaussianModel expects pre-sigmoid
+    out_gaussians._opacity = inverse_sigmoid(torch.clamp(render_opacity.detach().clone(), min=1e-6, max=1 - 1e-6))
 
-def compute_log_scales_and_quats_from_cov_upper(cov_upper: torch.Tensor):
-    """
-    Compute log-scales and rotation quaternions from an SPD covariance upper form using eigendecomposition.
-    """
-    N = cov_upper.shape[0]
-    if N == 0:
-        return cov_upper.new_zeros((0, 3)), cov_upper.new_zeros((0, 4))
-    cov = get_mat_from_upper(cov_upper)  # (N,3,3)
-    cov = torch.nan_to_num(cov, nan=0.0, posinf=1e6, neginf=-1e6)
-    cov = 0.5 * (cov + cov.transpose(1, 2))
-    I = torch.eye(3, device=cov.device, dtype=cov.dtype).unsqueeze(0).repeat(N, 1, 1)
-    cov = cov + 1e-6 * I
-    cov_cpu = cov.double().cpu()
-    evals_cpu, evecs_cpu = torch.linalg.eigh(cov_cpu)
-    evals = evals_cpu.to(device=cov.device, dtype=cov.dtype)
-    evecs = evecs_cpu.to(device=cov.device, dtype=cov.dtype)
-    evals = torch.clamp(torch.nan_to_num(evals, nan=1e-12, posinf=1e6, neginf=1e-12), min=1e-12)
-    log_scales = 0.5 * torch.log(evals)
-    quats = _rotation_matrix_to_quaternion_batch(evecs)
-    return log_scales, quats
+    # Covariance → scales & rotations.
+    # 1) Convert 6-vector upper-tri form to full 3x3 (initially on CUDA),
+    #    then move to CPU to avoid cusolver issues.
+    cov_mat = get_mat_from_upper(render_cov.detach().clone())  # (N,3,3) on CUDA
+    cov_mat = cov_mat.detach().cpu()
+    # Symmetrize to avoid numerical asymmetry
+    cov_mat = 0.5 * (cov_mat + cov_mat.transpose(1, 2))
+    # Replace NaNs / infs with safe values
+    cov_mat = torch.nan_to_num(cov_mat, nan=0.0, posinf=1e4, neginf=-1e4)
+    # Ensure positive-definite by adding a small jitter on the diagonal
+    eye = torch.eye(3, dtype=cov_mat.dtype).unsqueeze(0)
+    cov_mat = cov_mat + 1e-6 * eye
 
+    # 2) Eigen-decomposition of SPD covariance: Σ = Q Λ Q^T (on CPU)
+    eigvals, eigvecs = torch.linalg.eigh(cov_mat)
+    eigvals = torch.clamp(eigvals, min=1e-10)
+    # Sort eigenvalues descending to have stable axis ordering
+    eigvals, idx = torch.sort(eigvals, descending=True, dim=1)
+    idx_exp = idx.unsqueeze(1).expand_as(eigvecs)
+    eigvecs = torch.gather(eigvecs, 2, idx_exp)
+    # Ensure right-handed rotation (det > 0)
+    det = torch.det(eigvecs)
+    mask = det < 0
+    if mask.any():
+        eigvecs[mask, :, -1] *= -1
+    # 3) Scales are square-roots of eigenvalues
+    scales = torch.sqrt(eigvals)
+    out_gaussians._scaling = torch.log(scales)
+    # 4) Rotation matrices → quaternions
+    quats = _rotation_matrix_to_quaternion(eigvecs)
+    out_gaussians._rotation = quats
 
-def export_gaussians_ply_direct(
-    template_gaussians: GaussianModel,
-    pos: torch.Tensor,
-    shs: torch.Tensor,
-    opacity: torch.Tensor,
-    log_scales: torch.Tensor,
-    quats: torch.Tensor,
-    filepath: str,
-):
-    """
-    Export a PLY with precomputed parameters:
-    - pos: (N,3)
-    - shs: (N, SH, 3)
-    - opacity: (N,1) in [0,1]
-    - log_scales: (N,3)
-    - quats: (N,4) unit quaternions (w,x,y,z)
-    """
-    gm = GaussianModel(template_gaussians.max_sh_degree)
-    gm._xyz = pos.detach()
-    gm._features_dc = shs[:, 0:1, :].detach()
-    gm._features_rest = shs[:, 1:, :].detach()
-    gm._scaling = log_scales.detach()
-    gm._rotation = quats.detach()
-    gm._opacity = inverse_sigmoid(torch.clamp(opacity, 1e-6, 1 - 1e-6)).detach()
-    gm.save_ply(filepath)
+    out_gaussians.save_ply(filename)

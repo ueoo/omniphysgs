@@ -1,9 +1,8 @@
 train:
   seed: 0
   gpu: 0
-  model_path: 'dataset/bear'
-  export_path: '/scr/yuegao/outputs_ominiphysgs_all'
-  # export_path: '/datal/outputs'
+  model_path: 'dataset/flower_swing'
+  export_path: './outputs'
   train_tag:
   epochs: 10
   internal_epochs: 30
@@ -14,7 +13,7 @@ train:
   ckpt_epoch: -1
   export_video: True
   video_interval: 1
-  prompt: "a sand bear collapsing"
+  prompt: "a flower swaying in the wind"
 
 model:
   network: 'knn'
@@ -29,25 +28,24 @@ model:
 material:
   center: [0.5, 0.5, 0.5]
   size: [1.0, 1.0, 1.0]
-  rho: 1000.0
+  rho: 500.0
   elasticity_physicals:
+    - 'SigmaElasticity'
     - 'CorotatedElasticity'
     - 'StVKElasticity'
-    # - 'SigmaElasticity'
-    # - 'VolumeElasticity'
+    - 'VolumeElasticity'
   plasticity_physicals:
     - 'IdentityPlasticity'
     - 'DruckerPragerPlasticity'
-    # - 'SigmaPlasticity'
-    # - 'VonMisesPlasticity'
-    # For saving GPU memory. May need to balance label when uncommenting.
+    - 'SigmaPlasticity'
+    - 'VonMisesPlasticity'
   elasticity: 'neural'
   plasticity: 'neural'
 
 render:
   white_bg: True
   mpm_space_vertical_upward_axis: [0, 0, 1]
-  mpm_space_viewpoint_center: [0.8, 0.7, 0.7]
+  mpm_space_viewpoint_center: [0.5, 0.5, 0.7]
   default_camera_index: -1
   show_hint: False
   init_azimuthm: 170
@@ -59,8 +57,8 @@ render:
   delta_r: 0.0
 
 preprocessing:
-  scale_factor: 0.6
-  opacity_threshold: 0.0
+  scale_factor: 1.0
+  opacity_threshold: 0.00
   rotation_degree: [0.0]
   rotation_axis: [0]
   sim_area:
@@ -68,19 +66,33 @@ preprocessing:
 
 sim:
   num_grids: 25
-  dt: 3e-4
-  gravity: [0.0, 0.0, -9.8]
+  dt: 2e-4
+  gravity: [0.0, 0.0, 0.0]
+  num_stages: 150
   frames_per_stage: 20
   num_frames: 150
-  num_skip_frames: 50
+  num_skip_frames: 10
   steps_per_frame: 10
   clip_bound: 0.5
-  damping: 1.0
+  damping: 0.9999
+  init_velocity: [0.3, 0.0, 0.0]
   boundary_conditions:
-    - type: 'surface_collider'
-      point: [1.0, 1.0, 0.02]
-      normal: [0.0, 0.0, 1.0]
-      surface: 'sticky'
-      friction: 0.0
-      start_time: 0.0
+    - type: 'cuboid'
+      point: [0.5, 0.5, 0.15]
+      size: [0.5, 0.5, 0.15]
+      velocity: [0, 0, 0]
+      start_time: 0
       end_time: 1e3
+      reset: 1
+    - type: 'particle_impulse'
+      point: [0.5, 0.5, 0.9]
+      size: [0.5, 0.5, 0.1]
+      force: [10.0, 0, 0]
+      num_dt: 1
+      start_time: 0
+    - type: 'particle_impulse'
+      point: [0.5, 0.5, 0.9]
+      size: [0.5, 0.5, 0.1]
+      force: [-10.0, 0, 0]
+      num_dt: 1
+      start_time: 1.0

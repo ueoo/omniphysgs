@@ -2,7 +2,8 @@ train:
   seed: 0
   gpu: 0
   model_path: 'dataset/ficus'
-  export_path: '/datal/outputs'
+  export_path: '/scr/yuegao/outputs_ominiphysgs_all'
+  # export_path: '/datal/outputs'
   train_tag:
   epochs: 10
   internal_epochs: 30
