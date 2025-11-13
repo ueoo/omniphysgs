@@ -10,7 +10,8 @@ from .mpm_model import MPMModel
 
 
 def set_boundary_conditions(model: MPMModel, bc_params: DictConfig):
-    if bc_params is None:
+    if bc_params is None or len(bc_params) == 0:
+        print("No boundary conditions found")
         return
     for bc in bc_params:
         if bc["type"] == "cuboid":
@@ -219,12 +220,13 @@ def set_velocity_on_cuboid(
     end_time: float = 999.0,
     reset: bool = False,
 ):
+    print(f"Setting velocity on cuboid: point: {point}, size: {size}, velocity: {velocity}, start_time: {start_time}, end_time: {end_time}, reset: {reset}")
     point = torch.tensor(point, device=model.device).float()
     size = torch.tensor(size, device=model.device).float()
     velocity = torch.tensor(velocity, device=model.device).float()
     offset = model.grid_x * model.dx - point
     target = torch.all((torch.abs(offset) < size), dim=1)
-    # print("cuboid target shape: ", target.shape)
+    print(f"Cuboid target shape: {target.shape}")
 
     def collide(model: MPMModel, target: Tensor, velocity: Tensor, start_time: float, end_time: float, reset: bool):
         time = model.time
@@ -259,21 +261,31 @@ def add_impulse_on_particles(
     num_dt: int = 1,
     start_time: float = 0.0,
 ):
+    print(f"Adding impulse on particles: force: {force}, point: {point}, size: {size}, num_dt: {num_dt}, start_time: {start_time}")
     point = torch.tensor(point, device=model.device).float()
     size = torch.tensor(size, device=model.device).float()
     force = torch.tensor(force, device=model.device).float()
     offset = model.init_pos - point
     target = torch.all((torch.abs(offset) < size), dim=1)
-    # print("impulse target shape: ", target.shape)
-    # print("impulse force shape: ", force.shape, force.min(), force.max())
     end_time = start_time + num_dt * model.dt
+    print(f"Impulse target shape: {target.shape}")
 
     def impulse(
         model: MPMModel, x: Tensor, v: Tensor, target: Tensor, force: Tensor, start_time: float, end_time: float
     ):
         time = model.time
         if time >= start_time and time < start_time + num_dt * model.dt:
-            v[target] = v[target] + force / model.p_mass * dt
+            print(f"Impulse target shape: {target.shape}")
+            x_target = x[target]
+            print(f"x_target x min: {x_target[:, 0].min()}, max: {x_target[:, 0].max()}")
+            print(f"x_target y min: {x_target[:, 1].min()}, max: {x_target[:, 1].max()}")
+            print(f"x_target z min: {x_target[:, 2].min()}, max: {x_target[:, 2].max()}")
+            v_delta = force / model.p_mass * dt
+            print(f"v_delta x min: {v_delta[0].min()}, max: {v_delta[0].max()}")
+            print(f"v_delta y min: {v_delta[1].min()}, max: {v_delta[1].max()}")
+            print(f"v_delta z min: {v_delta[2].min()}, max: {v_delta[2].max()}")
+            v[target] = v[target] + v_delta
+
 
     model.pre_particle_process.append(
         partial(

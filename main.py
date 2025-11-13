@@ -166,7 +166,7 @@ def main(cfg, args=None):
     mpm_model = MPMModel(
         sim_params, material_params, init_pos=trans_pos, enable_train=train_params.enable_train, device=torch_device
     )
-    if len(sim_params.boundary_conditions) > 0:
+    if sim_params.boundary_conditions is not None and len(sim_params.boundary_conditions) > 0:
         set_boundary_conditions(mpm_model, sim_params.boundary_conditions)
     material = (
         PhysicsNetwork(
@@ -237,8 +237,11 @@ def main(cfg, args=None):
     requires_grad = train_params.enable_train
     x = trans_pos.detach()
     # a default vertical velocity is set
+    # v = torch.stack(
+    #     [torch.tensor([0.0, 0.0, -0.3], device=torch_device) for _ in range(gs_num)]
+    # )
     v = torch.stack(
-        [torch.tensor([0.0, 0.0, -0.3], device=torch_device) for _ in range(gs_num)]
+        [torch.tensor([0.3, 0.0, 0.0], device=torch_device) for _ in range(gs_num)]
     )
     # v = torch.zeros((gs_num, 3), device=torch_device)
     C = torch.zeros((gs_num, 3, 3), device=torch_device)

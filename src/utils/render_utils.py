@@ -138,6 +138,11 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
     init_screen_points = params["screen_points"]
     init_opacity = params["opacity"]
     init_shs = params["shs"]
+    print(f"Init pos shape: {init_pos.shape}")
+    print(f"Init pos x min: {init_pos[:, 0].min()}, max: {init_pos[:, 0].max()}")
+    print(f"Init pos y min: {init_pos[:, 1].min()}, max: {init_pos[:, 1].max()}")
+    print(f"Init pos z min: {init_pos[:, 2].min()}, max: {init_pos[:, 2].max()}")
+
     init_e_cat, init_p_cat = None, None
 
     # throw away low opacity kernels
@@ -264,6 +269,11 @@ def load_params(gaussians, pipeline, preprocessing_params, material_params, mode
         "scale_origin": scale_origin,
         "original_mean_pos": original_mean_pos,
     }
+
+    print(f"Trans (preprocessed GS) pos shape: {pos.shape}")
+    print(f"Trans (preprocessed GS) pos x min: {pos[:, 0].min()}, max: {pos[:, 0].max()}")
+    print(f"Trans (preprocessed GS) pos y min: {pos[:, 1].min()}, max: {pos[:, 1].max()}")
+    print(f"Trans (preprocessed GS) pos z min: {pos[:, 2].min()}, max: {pos[:, 2].max()}")
 
     return mpm_params, init_e_cat, init_p_cat, unselected_params, translate_params, init_screen_points
 
