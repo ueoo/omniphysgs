@@ -45,12 +45,12 @@ material:
 render:
   white_bg: True
   mpm_space_vertical_upward_axis: [0, 0, 1]
-  mpm_space_viewpoint_center: [0.5, 0.5, 0.7]
+  mpm_space_viewpoint_center: [0.5, 0.5, 0.75]
   default_camera_index: -1
   show_hint: False
-  init_azimuthm: 30
-  init_elevation: 0
-  init_radius: 1.6
+  init_azimuthm: 60
+  init_elevation: 10
+  init_radius: 2.5
   move_camera: False
   delta_a: -2.4
   delta_e: 0.8

@@ -13,7 +13,7 @@ train:
   ckpt_epoch: -1
   export_video: True
   video_interval: 1
-  prompt: "An adjustable lamp being move down"
+  prompt: "an adjustable lamp changing its height"
 
 model:
   network: 'knn'
@@ -30,16 +30,15 @@ material:
   size: [1.0, 1.0, 1.0]
   rho: 1000.0
   elasticity_physicals:
+    - 'SigmaElasticity'
     - 'CorotatedElasticity'
     - 'StVKElasticity'
-    # - 'SigmaElasticity'
-    # - 'VolumeElasticity'
+    - 'VolumeElasticity'
   plasticity_physicals:
     - 'IdentityPlasticity'
     - 'DruckerPragerPlasticity'
-    # - 'SigmaPlasticity'
-    # - 'VonMisesPlasticity'
-    # For saving GPU memory. May need to balance label when uncommenting.
+    - 'SigmaPlasticity'
+    - 'VonMisesPlasticity'
   elasticity: 'neural'
   plasticity: 'neural'
 
@@ -58,8 +57,8 @@ render:
   delta_r: 0.0
 
 preprocessing:
-  scale_factor: 0.6
-  opacity_threshold: 0.0
+  scale_factor: 1.0
+  opacity_threshold: 0.00
   rotation_degree: [0.0]
   rotation_axis: [0]
   sim_area:
@@ -67,12 +66,27 @@ preprocessing:
 
 sim:
   num_grids: 25
-  dt: 3e-4
-  gravity: [0.0, 0.0, 0.0]
+  dt: 2e-4
+  gravity: [0.0, 0.0, -9.8]
+  num_stages: 150
   frames_per_stage: 20
   num_frames: 150
-  num_skip_frames: 50
+  num_skip_frames: 10
   steps_per_frame: 10
   clip_bound: 0.5
-  damping: 1.0
-  boundary_conditions: []
+  damping: 0.9999
+  init_velocity: [0.0, 0.0, -0.3]
+  boundary_conditions:
+    - type: 'cuboid'
+      point: [0.5, 0.5, 0.1]
+      size: [0.5, 0.5, 0.1]
+      velocity: [0, 0, 0]
+      start_time: 0
+      end_time: 1e3
+      reset: 1
+    - type: 'particle_impulse'
+      point: [0.5, 0.5, 0.9]
+      size: [0.5, 0.5, 0.1]
+      force: [0, 0, -5.0]
+      num_dt: 1
+      start_time: 0
